@@ -65,6 +65,12 @@
                                         <span>自部署实例地址与私有域名 API Key</span>
                                     </button>
                                 </li>
+                                <li>
+                                    <button type="button" class="settings-sidebar-link" data-target="settingsMailNestSection" onclick="scrollSettingsSection('settingsMailNestSection', this)">
+                                        <strong>迈巢 MailNest</strong>
+                                        <span>API Key、接口地址与余额测试</span>
+                                    </button>
+                                </li>
                             </ul>
                         </div>
                     </aside>
@@ -745,6 +751,32 @@
                             <label class="form-label">DuckMail API Key（可选）</label>
                             <input type="text" class="form-input" id="settingsDuckmailApiKey" placeholder="dk_ 前缀的 API Key">
                             <div class="form-hint">用于获取私有域名，可从 <a class="inline-link" href="https://domain.duckmail.sbs" target="_blank">domain.duckmail.sbs</a> 获取。</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-section" id="settingsMailNestSection">
+                    <div class="settings-section-head">
+                        <span class="settings-section-kicker">MailNest</span>
+                        <h4>迈巢临时邮箱设置</h4>
+                        <p>用于购买迈巢临时邮箱、独占邮箱并取件。成功取到目标邮件后才会扣费。</p>
+                    </div>
+                    <div class="settings-panel settings-panel-grid">
+                        <div class="form-group">
+                            <label class="form-label">迈巢 API 地址</label>
+                            <input type="text" class="form-input" id="settingsMailnestBaseUrl" placeholder="https://mailnest.top">
+                            <div class="form-hint">默认使用官方地址，一般无需修改。</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">迈巢 API Key</label>
+                            <input type="text" class="form-input" id="settingsMailnestApiKey" placeholder="Bearer API Key">
+                            <div class="form-hint">可从 <a class="inline-link" href="https://mailnest.top/docs/api-overview" target="_blank">mailnest.top</a> 获取，请求头为 <code>Authorization: Bearer</code>。</div>
+                        </div>
+                        <div class="form-group settings-form-span-full">
+                            <div class="settings-inline-action">
+                                <button class="btn btn-secondary" type="button" id="testMailnestBtn" onclick="testMailnestConnection()">测试连接</button>
+                            </div>
+                            <div class="form-hint" id="settingsMailnestTestResult">未测试</div>
                         </div>
                     </div>
                 </section>

@@ -593,6 +593,8 @@ def api_get_settings():
     # 返回 DuckMail 设置
     settings['duckmail_base_url'] = get_duckmail_base_url()
     settings['duckmail_api_key'] = get_duckmail_api_key()
+    settings['mailnest_base_url'] = get_mailnest_base_url()
+    settings['mailnest_api_key'] = get_mailnest_api_key()
     settings['cloudflare_worker_domain'] = get_cloudflare_worker_domain()
     settings['cloudflare_email_domains'] = ', '.join(get_cloudflare_email_domains())
     settings['cloudflare_admin_password'] = get_cloudflare_admin_password()
@@ -889,6 +891,20 @@ def api_update_settings():
             updated.append('DuckMail API Key')
         else:
             errors.append('更新 DuckMail API Key 失败')
+
+    if 'mailnest_base_url' in data:
+        new_url = data['mailnest_base_url'].strip().rstrip('/')
+        if set_setting('mailnest_base_url', new_url):
+            updated.append('迈巢 API 地址')
+        else:
+            errors.append('更新迈巢 API 地址失败')
+
+    if 'mailnest_api_key' in data:
+        new_mn_key = data['mailnest_api_key'].strip()
+        if set_setting('mailnest_api_key', new_mn_key):
+            updated.append('迈巢 API Key')
+        else:
+            errors.append('更新迈巢 API Key 失败')
 
     if 'cloudflare_worker_domain' in data:
         new_domain = data['cloudflare_worker_domain'].strip()

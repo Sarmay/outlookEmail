@@ -395,6 +395,7 @@ def append_temp_email_export_sections(lines: List[str], temp_emails: List[Dict[s
     gptmail_list = [te for te in temp_emails if te.get('provider', 'gptmail') == 'gptmail']
     duckmail_list = [te for te in temp_emails if te.get('provider') == 'duckmail']
     cloudflare_list = [te for te in temp_emails if te.get('provider') == 'cloudflare']
+    mailnest_list = [te for te in temp_emails if te.get('provider') == 'mailnest']
 
     if gptmail_list:
         lines.append('[gptmail]')
@@ -419,6 +420,12 @@ def append_temp_email_export_sections(lines: List[str], temp_emails: List[Dict[s
             for te in grouped[channel_name]:
                 lines.append(te['email'])
                 exported_count += 1
+
+    if mailnest_list:
+        lines.append('[mailnest]')
+        for te in mailnest_list:
+            lines.append(te['email'])
+            exported_count += 1
 
     return exported_count
 

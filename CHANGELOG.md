@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+### Added
+- 临时邮箱新增迈巢 MailNest 渠道：可在设置中配置 API Key，按项目购买临时邮箱或独占邮箱，取件、释放、账户同步与余额测试。
+- 新增 `GET /api/mailnest/products`、`GET /api/mailnest/balance`、`POST /api/temp-emails/import-mailnest`；生成/批量生成、邮件列表和刷新接口支持 `provider=mailnest`。
+
 ## [3.0.8] - 2026-09-18
 
 ### Added

@@ -127,9 +127,9 @@
         }
 
         .temp-email-provider-modal-content {
-            width: min(520px, calc(100vw - 32px));
+            width: min(580px, calc(100vw - 32px));
             max-width: calc(100vw - 32px);
-            max-height: min(92vh, 680px);
+            max-height: min(92vh, 720px);
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -152,6 +152,7 @@
         /* Segmented Control for Provider Selection */
         .provider-tabs {
             display: flex;
+            flex-wrap: wrap;
             background-color: #f1f5f9;
             padding: 4px;
             border-radius: 10px;
@@ -161,7 +162,8 @@
         }
 
         .provider-tab-item {
-            flex: 1;
+            flex: 1 1 calc(25% - 4px);
+            min-width: 88px;
             position: relative;
         }
 

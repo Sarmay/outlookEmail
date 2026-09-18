@@ -78,7 +78,7 @@
 临时邮箱：
 
 - 进入“临时邮箱”分组后，会加载 `/api/temp-emails` 的临时邮箱列表。
-- 支持 GPTMail、DuckMail、Cloudflare 临时邮箱。
+- 支持 GPTMail、DuckMail、Cloudflare、迈巢 MailNest 临时邮箱。
 - 可查看单个临时邮箱邮件。
 - 可刷新、复制、删除临时邮箱。
 - 如果配置了 Cloudflare 临时邮箱服务，会显示 `Cloudflare所有邮件` 入口，可查看当前 Worker 中的全部邮件，并按收件地址过滤。
@@ -111,12 +111,14 @@
 - `gptmail`: 每行一个邮箱。
 - `duckmail`: 每行 `邮箱----密码`。
 - `cloudflare`: 每行 `邮箱----JWT`。
+- `mailnest`: 每行一个已购买的迈巢邮箱地址。
 
 生成临时邮箱：
 
-- 支持 GPTMail / DuckMail / Cloudflare。
+- 支持 GPTMail / DuckMail / Cloudflare / 迈巢。
 - DuckMail 需要填写域名、用户名和密码。
 - Cloudflare 可以填写域名和用户名；用户名可留空随机生成。
+- 迈巢需要选择临时/独占类型；临时邮箱还需要选择项目。
 
 ## 刷新
 

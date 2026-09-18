@@ -8,6 +8,7 @@ __pycache__/
 dist/
 build/
 venv/
+.venv/
 env/
 ENV/
 
@@ -51,3 +52,4 @@ openspec
 /.trellis/
 /scripts/compare_accounts_db.py
 /scripts/export_accounts.py
+.playwright-mcp/

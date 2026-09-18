@@ -4,7 +4,7 @@
 Outlook 邮件 Web 应用
 基于 Flask 的 Web 界面，支持多邮箱管理和邮件查看
 使用 SQLite 数据库存储邮箱信息，支持分组管理
-支持 GPTMail 临时邮箱服务
+支持 GPTMail、DuckMail、Cloudflare、迈巢 MailNest 临时邮箱服务
 """
 
 import email
@@ -756,6 +756,12 @@ GPTMAIL_API_KEY = os.getenv("GPTMAIL_API_KEY", "gpt-test")  # 测试 API Key，�
 # DuckMail API 配置
 DUCKMAIL_BASE_URL = os.getenv("DUCKMAIL_BASE_URL", "https://api.duckmail.sbs")
 DUCKMAIL_API_KEY = os.getenv("DUCKMAIL_API_KEY", "")  # 可选，dk_ 前缀，用于私有域名
+
+# 迈巢 MailNest API 配置
+MAILNEST_BASE_URL = os.getenv("MAILNEST_BASE_URL", "https://mailnest.top")
+MAILNEST_API_KEY = os.getenv("MAILNEST_API_KEY", "")
+MAILNEST_SUCCESS_CODE = "00000"
+MAILNEST_BUY_MAX_COUNT = 100
 
 # Cloudflare Temp Email 配置
 CLOUDFLARE_WORKER_DOMAIN = os.getenv("CLOUDFLARE_WORKER_DOMAIN") or os.getenv("WORKER_DOMAIN", "")
@@ -1876,6 +1882,22 @@ def init_db():
         cursor.execute('ALTER TABLE temp_emails ADD COLUMN cloudflare_address_id TEXT')
     if 'cloudflare_channel_id' not in temp_columns:
         cursor.execute('ALTER TABLE temp_emails ADD COLUMN cloudflare_channel_id INTEGER')
+    if 'mailnest_order_id' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_order_id TEXT')
+    if 'mailnest_sale_mode' not in temp_columns:
+        cursor.execute("ALTER TABLE temp_emails ADD COLUMN mailnest_sale_mode TEXT")
+    if 'mailnest_project_code' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_project_code TEXT')
+    if 'mailnest_project_name' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_project_name TEXT')
+    if 'mailnest_status' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_status TEXT')
+    if 'mailnest_billing_status' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_billing_status TEXT')
+    if 'mailnest_expired_at' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_expired_at TEXT')
+    if 'mailnest_started_at' not in temp_columns:
+        cursor.execute('ALTER TABLE temp_emails ADD COLUMN mailnest_started_at TEXT')
 
     cursor.execute("PRAGMA table_info(retained_normal_mail_messages)")
     retained_normal_mail_columns = {row[1] for row in cursor.fetchall()}
@@ -2007,6 +2029,16 @@ def init_db():
         INSERT OR IGNORE INTO settings (key, value)
         VALUES ('duckmail_api_key', ?)
     ''', (DUCKMAIL_API_KEY,))
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO settings (key, value)
+        VALUES ('mailnest_base_url', ?)
+    ''', (MAILNEST_BASE_URL,))
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO settings (key, value)
+        VALUES ('mailnest_api_key', ?)
+    ''', (MAILNEST_API_KEY,))
 
     cursor.execute('''
         INSERT OR IGNORE INTO settings (key, value)
@@ -2564,6 +2596,7 @@ def init_app():
     print(f"运行目录: {runtime_root()}")
     print(f"GPTMail API: {GPTMAIL_BASE_URL}")
     print(f"DuckMail API: {DUCKMAIL_BASE_URL}")
+    print(f"MailNest API: {MAILNEST_BASE_URL}")
     print(f"Cloudflare Temp Email Worker: {CLOUDFLARE_WORKER_DOMAIN or '未配置'}")
     print("=" * 60)
 
@@ -3491,6 +3524,18 @@ def get_duckmail_api_key() -> str:
     """获取 DuckMail API Key（优先从数据库读取）"""
     api_key = get_setting('duckmail_api_key')
     return api_key if api_key else DUCKMAIL_API_KEY
+
+
+def get_mailnest_base_url() -> str:
+    """获取迈巢 MailNest API 基础 URL（优先从数据库读取）"""
+    url = (get_setting('mailnest_base_url') or '').strip()
+    return url.rstrip('/') if url else MAILNEST_BASE_URL.rstrip('/')
+
+
+def get_mailnest_api_key() -> str:
+    """获取迈巢 MailNest API Key（优先从数据库读取）"""
+    api_key = get_setting('mailnest_api_key')
+    return api_key if api_key else MAILNEST_API_KEY
 
 
 def get_cloudflare_worker_domain() -> str:

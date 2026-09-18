@@ -49,6 +49,7 @@
     ['gptmail', 'GPTMail'],
     ['duckmail', 'DuckMail'],
     ['cloudflare', 'Cloudflare'],
+    ['mailnest', '迈巢'],
   ];
 
   function getEl(id) {
@@ -1330,6 +1331,13 @@
             <label><span>用户名 / 前缀</span><input id="generateUsername"></label>
             <label><span>密码</span><input id="generatePassword" type="password"></label>
           </div>
+          <div id="mailnestGenerateFields" class="hidden">
+            <div class="row">
+              <label><span>迈巢类型</span><select id="generateMailnestSaleMode">${renderOptions([['temporary', '临时邮箱'], ['exclusive', '独占邮箱']], 'temporary')}</select></label>
+              <label><span>迈巢项目</span><select id="generateMailnestProject"></select></label>
+            </div>
+            <label><span>数量</span><input id="generateMailnestCount" type="number" min="1" max="100" value="1"></label>
+          </div>
           <div class="toolbar">
             <button id="btnLoadTempDomains" class="secondary-btn" type="button">刷新域名</button>
             <button id="btnGenerateTempEmail" class="primary-btn" type="button">生成</button>
@@ -1351,6 +1359,7 @@
       updateProviderFields();
       getEl('btnImportSubmit').addEventListener('click', () => submitImport(config));
       getEl('generateProvider').addEventListener('change', () => loadTempDomains(config));
+      getEl('generateMailnestSaleMode')?.addEventListener('change', () => syncMailnestGenerateFields());
       getEl('btnLoadTempDomains').addEventListener('click', () => loadTempDomains(config));
       getEl('btnGenerateTempEmail').addEventListener('click', () => generateTempEmail(config));
       await loadTempDomains(config);
@@ -1395,12 +1404,38 @@
     }, '正在导入账号...');
   }
 
+  function syncMailnestGenerateFields() {
+    const provider = valueOf('generateProvider') || 'gptmail';
+    const fields = getEl('mailnestGenerateFields');
+    const projectSelect = getEl('generateMailnestProject');
+    if (fields) fields.classList.toggle('hidden', provider !== 'mailnest');
+    if (projectSelect) {
+      projectSelect.disabled = valueOf('generateMailnestSaleMode') === 'exclusive';
+    }
+  }
+
   async function loadTempDomains(config) {
     const provider = valueOf('generateProvider') || 'gptmail';
     const select = getEl('generateDomain');
+    syncMailnestGenerateFields();
     if (!select) return;
     select.innerHTML = '<option value="">默认</option>';
     if (provider === 'gptmail') return;
+    if (provider === 'mailnest') {
+      await runAction(config, async () => {
+        const payload = await Api.apiRequest(config, '/api/mailnest/products', { timeoutMs: 70000 });
+        const projects = Array.isArray(payload.temporary) ? payload.temporary : [];
+        const projectSelect = getEl('generateMailnestProject');
+        if (projectSelect) {
+          projectSelect.innerHTML = '<option value="">选择项目</option>' + projects.map((item) => {
+            const code = item.code || '';
+            const name = item.name || code;
+            return `<option value="${escapeHtml(code)}">${escapeHtml(name)} · ¥${escapeHtml(item.price || '')}</option>`;
+          }).join('');
+        }
+      }, '正在加载迈巢项目...');
+      return;
+    }
     await runAction(config, async () => {
       const endpoint = provider === 'duckmail' ? '/api/duckmail/domains' : '/api/cloudflare/domains';
       const payload = await Api.apiRequest(config, endpoint, { timeoutMs: 70000 });
@@ -1428,8 +1463,13 @@
       } else if (provider === 'cloudflare') {
         body.username = username;
         body.domain = domain;
+      } else if (provider === 'mailnest') {
+        body.sale_mode = valueOf('generateMailnestSaleMode') || 'temporary';
+        body.project_code = valueOf('generateMailnestProject');
+        body.count = toInt(valueOf('generateMailnestCount'), 1);
       }
-      const payload = await Api.apiRequest(config, '/api/temp-emails/generate', {
+      const endpoint = provider === 'mailnest' ? '/api/temp-emails/generate-batch' : '/api/temp-emails/generate';
+      const payload = await Api.apiRequest(config, endpoint, {
         method: 'POST',
         body,
         timeoutMs: 70000,
@@ -1896,6 +1936,8 @@
           <label><span>GPTMail API Key</span><input id="settingGptmailKey" value="${escapeHtml(settings.gptmail_api_key || '')}"></label>
           <label><span>DuckMail API 地址</span><input id="settingDuckmailBaseUrl" value="${escapeHtml(settings.duckmail_base_url || '')}"></label>
           <label><span>DuckMail API Key</span><input id="settingDuckmailApiKey" value="${escapeHtml(settings.duckmail_api_key || '')}"></label>
+          <label><span>迈巢 API 地址</span><input id="settingMailnestBaseUrl" value="${escapeHtml(settings.mailnest_base_url || '')}"></label>
+          <label><span>迈巢 API Key</span><input id="settingMailnestApiKey" value="${escapeHtml(settings.mailnest_api_key || '')}"></label>
           <label><span>Cloudflare Worker 域名</span><input id="settingCloudflareWorkerDomain" value="${escapeHtml(settings.cloudflare_worker_domain || '')}"></label>
           <label><span>Cloudflare 邮箱域名</span><input id="settingCloudflareEmailDomains" value="${escapeHtml(settings.cloudflare_email_domains || '')}"></label>
           <label><span>Cloudflare 管理密码</span><input id="settingCloudflareAdminPassword" type="password" value="${escapeHtml(settings.cloudflare_admin_password || '')}"></label>
@@ -1999,6 +2041,8 @@
       external_api_key: valueOf('settingExternalKey'),
       duckmail_base_url: valueOf('settingDuckmailBaseUrl'),
       duckmail_api_key: valueOf('settingDuckmailApiKey'),
+      mailnest_base_url: valueOf('settingMailnestBaseUrl'),
+      mailnest_api_key: valueOf('settingMailnestApiKey'),
       cloudflare_worker_domain: valueOf('settingCloudflareWorkerDomain'),
       cloudflare_email_domains: valueOf('settingCloudflareEmailDomains'),
       cloudflare_admin_password: valueOf('settingCloudflareAdminPassword'),

@@ -1,6 +1,6 @@
 # 多邮箱邮件管理工具
 
-一个面向多邮箱账号场景的邮件管理工具，支持通过 Outlook/Hotmail OAuth、Microsoft Graph API 和标准 IMAP 统一读取、管理和转发邮件，并提供 Web 界面、Chrome/Edge 浏览器扩展，用于分组管理、账号管理、邮件查看和对外 API 调用。当前支持 Outlook/Hotmail、Gmail、QQ、163、126、Yahoo、阿里邮箱以及自定义 IMAP 邮箱，同时集成 GPTMail、DuckMail、Cloudflare Temp Email 多提供商临时邮箱能力。
+一个面向多邮箱账号场景的邮件管理工具，支持通过 Outlook/Hotmail OAuth、Microsoft Graph API 和标准 IMAP 统一读取、管理和转发邮件，并提供 Web 界面、Chrome/Edge 浏览器扩展，用于分组管理、账号管理、邮件查看和对外 API 调用。当前支持 Outlook/Hotmail、Gmail、QQ、163、126、Yahoo、阿里邮箱以及自定义 IMAP 邮箱，同时集成 GPTMail、DuckMail、Cloudflare Temp Email、迈巢 MailNest 多提供商临时邮箱能力。
 
 注意：改密码会导致auth失效，需要重新授权
 ## 📦 快速开始
@@ -241,7 +241,7 @@ Outlook/Hotmail OAuth 的 IMAP 回退链路默认按 UID 读取详情和附件�
 - 🎭 **系统级外观皮肤** - 支持内置 classic、自定义 zip 皮肤包和 Git 仓库来源；切换后所有登录设备一致
 - ⚡ **性能优化** - 邮件列表与账号列表缓存，分组切换和账号切换更快
 - 📄 **分页加载** - 滚动到底部自动加载下一页（每页20封）
-- 🔥 **临时邮箱** - 集成 GPTMail + DuckMail + Cloudflare Temp Email，多提供商生成、导入、读取、查看详情；Cloudflare 支持多渠道配置，每个 Worker/管理员密码/邮件池独立管理，并按渠道查看全部邮件
+- 🔥 **临时邮箱** - 集成 GPTMail + DuckMail + Cloudflare Temp Email + 迈巢 MailNest，多提供商生成、导入、读取、查看详情；Cloudflare 支持多渠道配置；迈巢支持按项目购买临时邮箱/独占邮箱、取件扣费和账户同步
 - ⚙️ **系统设置** - 在线修改密码、API Key、邮件获取超时等
 - 🔄 **OAuth2 助手** - 内置授权流程，快速获取 Refresh Token
 - 💾 **邮件缓存** - 智能缓存邮件列表，切换即时展示；普通邮箱本地保留默认关闭，可在设置页开启、查看统计并清理本地保留缓存
@@ -716,6 +716,7 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 - [Microsoft Graph API](https://docs.microsoft.com/graph/)
 - [GPTMail](https://mail.chatgpt.org.uk)
+- [迈巢 MailNest](https://mailnest.top/docs/api-overview)
 - [Flask](https://flask.palletsprojects.com/)
 - [Resin](https://github.com/Resinat/Resin) — 高性能粘性代理池网关
 

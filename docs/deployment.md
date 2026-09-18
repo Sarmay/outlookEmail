@@ -132,6 +132,8 @@ docker-compose down
 | `GPTMAIL_API_KEY` | GPTMail API Key | `gpt-test` |
 | `DUCKMAIL_BASE_URL` | DuckMail API 地址 | `https://api.duckmail.sbs` |
 | `DUCKMAIL_API_KEY` | DuckMail API Key | 空 |
+| `MAILNEST_BASE_URL` | 迈巢 MailNest API 地址 | `https://mailnest.top` |
+| `MAILNEST_API_KEY` | 迈巢 MailNest API Key | 空 |
 | `CLOUDFLARE_WORKER_DOMAIN` | Cloudflare Temp Email Worker 域名，也兼容读取 `WORKER_DOMAIN` | 空 |
 | `CLOUDFLARE_EMAIL_DOMAINS` | Cloudflare 临时邮箱域名列表，逗号分隔，也兼容读取 `EMAIL_DOMAIN` | 空 |
 | `CLOUDFLARE_ADMIN_PASSWORD` | Cloudflare 管理密码，也兼容读取 `ADMIN_PASSWORD` | 空 |

@@ -103,6 +103,14 @@
                                     <option value="gptmail">GPTMail</option>
                                     <option value="duckmail">DuckMail</option>
                                     <option value="cloudflare">Cloudflare</option>
+                                    <option value="mailnest">迈巢</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="importMailnestModeGroup" style="display: none;">
+                                <label class="form-label">导入方式</label>
+                                <select class="form-select" id="importMailnestImportMode" onchange="updateImportHint()">
+                                    <option value="auto">从迈巢账户同步</option>
+                                    <option value="manual">手动导入邮箱地址</option>
                                 </select>
                             </div>
                             <div class="form-group" id="importCloudflareChannelGroup" style="display: none;">

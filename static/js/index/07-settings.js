@@ -1192,7 +1192,9 @@
             const isTempGroup = isTempImportGroup();
             const tempProvider = isTempGroup ? (document.getElementById('importChannelSelect').value || 'gptmail') : '';
             const cloudflareMode = document.getElementById('importCloudflareImportMode')?.value || 'auto';
+            const mailnestMode = document.getElementById('importMailnestImportMode')?.value || 'auto';
             const isCloudflareAutoImport = isTempGroup && tempProvider === 'cloudflare' && cloudflareMode === 'auto';
+            const isMailnestAutoImport = isTempGroup && tempProvider === 'mailnest' && mailnestMode === 'auto';
             const cloudflareChannelId = document.getElementById('importCloudflareChannelSelect')?.value || '';
             const imapHost = document.getElementById('importImapHost')?.value.trim() || '';
             const imapPort = parseInt(document.getElementById('importImapPort')?.value || '993', 10);
@@ -1202,7 +1204,7 @@
             const tagIds = getImportSelectedTagIds();
             const importButton = document.querySelector('#addAccountModal .btn.btn-primary');
 
-            if (!input && !isCloudflareAutoImport) {
+            if (!input && !isCloudflareAutoImport && !isMailnestAutoImport) {
                 showToast('请输入账号信息', 'error');
                 return;
             }
@@ -1225,12 +1227,12 @@
                 if (isTempGroup) {
                     const endpoint = isCloudflareAutoImport
                         ? '/api/temp-emails/import-cloudflare-addresses'
-                        : '/api/temp-emails/import';
+                        : (isMailnestAutoImport ? '/api/temp-emails/import-mailnest' : '/api/temp-emails/import');
                     const payload = {
                         provider: tempProvider,
                         tag_ids: tagIds
                     };
-                    if (!isCloudflareAutoImport) {
+                    if (!isCloudflareAutoImport && !isMailnestAutoImport) {
                         payload.account_string = input;
                     }
                     if (tempProvider === 'cloudflare') {
@@ -1762,6 +1764,37 @@
             }
         }
 
+        async function testMailnestConnection() {
+            const btn = document.getElementById('testMailnestBtn');
+            const resultEl = document.getElementById('settingsMailnestTestResult');
+            const originalText = btn?.textContent || '测试连接';
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '测试中...';
+            }
+            if (resultEl) resultEl.textContent = '正在请求迈巢余额...';
+            try {
+                const response = await fetch('/api/mailnest/balance');
+                const data = await response.json();
+                if (data.success) {
+                    const text = `连接成功：可用 ¥${data.available_balance || '0'}，冻结 ¥${data.frozen_balance || '0'}，总额 ¥${data.balance || '0'}`;
+                    if (resultEl) resultEl.textContent = text;
+                    showToast('迈巢连接成功', 'success');
+                } else {
+                    if (resultEl) resultEl.textContent = data.error || '测试失败';
+                    handleApiError(data, '迈巢连接失败');
+                }
+            } catch (error) {
+                if (resultEl) resultEl.textContent = '测试失败';
+                showToast('迈巢连接失败', 'error');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            }
+        }
+
         async function loadSettings() {
             ensureForwardingSettingsUI();
             try {
@@ -1776,6 +1809,12 @@
                     document.getElementById('settingsExternalApiKey').value = data.settings.external_api_key || '';
                     document.getElementById('settingsDuckmailBaseUrl').value = data.settings.duckmail_base_url || '';
                     document.getElementById('settingsDuckmailApiKey').value = data.settings.duckmail_api_key || '';
+                    const mailnestBaseUrl = document.getElementById('settingsMailnestBaseUrl');
+                    const mailnestApiKey = document.getElementById('settingsMailnestApiKey');
+                    if (mailnestBaseUrl) mailnestBaseUrl.value = data.settings.mailnest_base_url || '';
+                    if (mailnestApiKey) mailnestApiKey.value = data.settings.mailnest_api_key || '';
+                    const mailnestTestResult = document.getElementById('settingsMailnestTestResult');
+                    if (mailnestTestResult) mailnestTestResult.textContent = '未测试';
                     document.getElementById('settingsCloudflareAiEnabled').checked = String(data.settings.cloudflare_ai_username_enabled) === 'true';
                     document.getElementById('settingsCloudflareAiApiUrl').value = data.settings.cloudflare_ai_username_api_url || '';
                     document.getElementById('settingsCloudflareAiModel').value = data.settings.cloudflare_ai_username_model || '';
@@ -1884,6 +1923,8 @@
             settings.external_api_key = externalApiKey;
             settings.duckmail_base_url = document.getElementById('settingsDuckmailBaseUrl').value.trim();
             settings.duckmail_api_key = document.getElementById('settingsDuckmailApiKey').value.trim();
+            settings.mailnest_base_url = document.getElementById('settingsMailnestBaseUrl')?.value.trim() || '';
+            settings.mailnest_api_key = document.getElementById('settingsMailnestApiKey')?.value.trim() || '';
             settings.cloudflare_ai_username_enabled = !!document.getElementById('settingsCloudflareAiEnabled')?.checked;
             settings.cloudflare_ai_username_api_url = document.getElementById('settingsCloudflareAiApiUrl')?.value.trim() || '';
             settings.cloudflare_ai_username_model = document.getElementById('settingsCloudflareAiModel')?.value.trim() || '';

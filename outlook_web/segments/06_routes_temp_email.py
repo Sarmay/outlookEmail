@@ -960,6 +960,448 @@ def get_duckmail_token_for_email(email_addr: str) -> Optional[str]:
     return token
 
 
+# ==================== 迈巢 MailNest API ====================
+
+MAILNEST_RETRYABLE_RECEIVE_CODES = {'D0005'}
+MAILNEST_UNAVAILABLE_RECEIVE_CODES = {'D0004', 'D0006'}
+
+
+def normalize_mailnest_buy_count(value: Any) -> Optional[int]:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    if count < 1 or count > MAILNEST_BUY_MAX_COUNT:
+        return None
+    return count
+
+
+def normalize_mailnest_sale_mode(value: Any) -> str:
+    sale_mode = str(value or '').strip().lower()
+    if sale_mode in {'exclusive', '独占', '独占邮箱'}:
+        return 'exclusive'
+    return 'temporary'
+
+
+def parse_mailnest_timestamp(value: Any) -> int:
+    if value in (None, ''):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        return int(datetime.fromisoformat(text.replace('Z', '+00:00')).timestamp())
+    except Exception:
+        return 0
+
+
+def mailnest_error_message(result: Optional[Dict[str, Any]], fallback: str) -> str:
+    if not result:
+        return fallback
+    return str(result.get('error') or result.get('msg') or fallback)
+
+
+def mailnest_request(method: str, endpoint: str, params: dict = None,
+                     json_data: dict = None, require_auth: bool = True,
+                     timeout: int = 30) -> Dict[str, Any]:
+    """发送迈巢 MailNest API 请求，统一解析业务状态码。"""
+    base_url = get_mailnest_base_url()
+    if not base_url:
+        return {'success': False, 'error': '未配置迈巢 API 地址'}
+
+    if require_auth:
+        api_key = (get_mailnest_api_key() or '').strip()
+        if not api_key:
+            return {'success': False, 'error': '未配置迈巢 API Key'}
+    else:
+        api_key = (get_mailnest_api_key() or '').strip()
+
+    try:
+        url = f"{base_url}{endpoint}"
+        headers = {'Content-Type': 'application/json'}
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+
+        method_upper = method.upper()
+        if method_upper == 'GET':
+            response = requests.get(url, headers=headers, params=params, timeout=timeout)
+        elif method_upper == 'POST':
+            response = requests.post(url, headers=headers, params=params, json=json_data, timeout=timeout)
+        else:
+            return {'success': False, 'error': '不支持的请求方法'}
+
+        if response.status_code == 401:
+            return {'success': False, 'error': '迈巢 API Key 无效或已失效', 'code': '401'}
+
+        try:
+            payload = response.json()
+        except Exception:
+            if response.status_code >= 400:
+                return {'success': False, 'error': f'迈巢 API 请求失败: HTTP {response.status_code}'}
+            return {'success': False, 'error': '迈巢 API 响应不是有效 JSON'}
+
+        if not isinstance(payload, dict):
+            return {'success': False, 'error': '迈巢 API 响应格式无效'}
+
+        code = str(payload.get('code') or '')
+        data = payload.get('data')
+        msg = str(payload.get('msg') or '').strip()
+        if response.status_code == 200 and code == MAILNEST_SUCCESS_CODE:
+            return {'success': True, 'code': code, 'data': data, 'msg': msg}
+
+        error = msg or f'迈巢请求失败: {code or response.status_code}'
+        return {
+            'success': False,
+            'error': error,
+            'code': code or str(response.status_code),
+            'data': data,
+            'msg': msg,
+        }
+    except Exception as exc:
+        return {'success': False, 'error': f'请求异常: {str(exc)}'}
+
+
+def mailnest_get_products() -> Dict[str, Any]:
+    result = mailnest_request('GET', '/api/product/info', require_auth=False)
+    if not result.get('success'):
+        return result
+    data = result.get('data') or {}
+    temporary = data.get('temporary') if isinstance(data, dict) else None
+    exclusive = data.get('exclusive') if isinstance(data, dict) else None
+    return {
+        'success': True,
+        'temporary': temporary if isinstance(temporary, list) else [],
+        'exclusive': exclusive if isinstance(exclusive, dict) else {},
+    }
+
+
+def mailnest_get_balance() -> Dict[str, Any]:
+    result = mailnest_request('GET', '/api/v1/balance')
+    if not result.get('success'):
+        return result
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    return {
+        'success': True,
+        'balance': str(data.get('balance') or '0'),
+        'frozen_balance': str(data.get('frozen_balance') or '0'),
+        'available_balance': str(data.get('available_balance') or '0'),
+    }
+
+
+def mailnest_buy_emails(sale_mode: str, count: int = 1,
+                        project_code: str = '') -> Dict[str, Any]:
+    normalized_mode = normalize_mailnest_sale_mode(sale_mode)
+    payload: Dict[str, Any] = {'count': count}
+    if normalized_mode == 'exclusive':
+        result = mailnest_request('POST', '/api/v1/email/exclusive/buy', json_data=payload)
+    else:
+        if not str(project_code or '').strip():
+            return {'success': False, 'error': '请选择迈巢临时邮箱项目'}
+        payload['project_code'] = str(project_code).strip()
+        result = mailnest_request('POST', '/api/v1/email/temporary/buy', json_data=payload)
+
+    if not result.get('success'):
+        return result
+
+    orders = result.get('data')
+    if isinstance(orders, dict):
+        orders = [orders]
+    if not isinstance(orders, list) or not orders:
+        return {'success': False, 'error': '迈巢未返回邮箱订单'}
+    return {'success': True, 'orders': orders, 'sale_mode': normalized_mode}
+
+
+def mailnest_list_orders(sale_mode: str, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
+    normalized_mode = normalize_mailnest_sale_mode(sale_mode)
+    endpoint = '/api/v1/email/exclusive' if normalized_mode == 'exclusive' else '/api/v1/email/temporary'
+    result = mailnest_request('GET', endpoint, params={'page': page, 'page_size': page_size})
+    if not result.get('success'):
+        return result
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    items = data.get('items') if isinstance(data.get('items'), list) else []
+    return {
+        'success': True,
+        'sale_mode': normalized_mode,
+        'items': items,
+        'total': data.get('total', len(items)),
+        'page': data.get('page', page),
+        'page_size': data.get('page_size', page_size),
+    }
+
+
+def mailnest_receive_messages(email_addr: str) -> Dict[str, Any]:
+    result = mailnest_request(
+        'POST',
+        '/api/v1/email/receive',
+        json_data={'email': email_addr},
+        timeout=45,
+    )
+    code = str(result.get('code') or '')
+    if result.get('success'):
+        data = result.get('data')
+        if data is None:
+            messages = []
+        elif isinstance(data, list):
+            messages = data
+        elif isinstance(data, dict):
+            messages = [data]
+        else:
+            messages = []
+        return {'success': True, 'messages': messages, 'code': code}
+
+    if code in MAILNEST_RETRYABLE_RECEIVE_CODES:
+        return {
+            'success': True,
+            'messages': [],
+            'code': code,
+            'pending': True,
+            'error': mailnest_error_message(result, '暂未取到匹配邮件，请稍后再试'),
+        }
+    return result
+
+
+def mailnest_release_email(email_addr: str) -> Dict[str, Any]:
+    return mailnest_request('POST', '/api/v1/email/release', json_data={'email': email_addr})
+
+
+def extract_mailnest_order_fields(order: Dict[str, Any],
+                                  fallback_sale_mode: str = 'temporary') -> Dict[str, Any]:
+    sale_mode = normalize_mailnest_sale_mode(order.get('sale_mode') or fallback_sale_mode)
+    return {
+        'mailnest_order_id': str(order.get('id') or '').strip() or None,
+        'mailnest_sale_mode': sale_mode,
+        'mailnest_project_code': str(order.get('project_code') or '').strip() or None,
+        'mailnest_project_name': str(order.get('project_name') or '').strip() or None,
+        'mailnest_status': str(order.get('status') or '').strip() or None,
+        'mailnest_billing_status': str(order.get('billing_status') or '').strip() or None,
+        'mailnest_expired_at': str(order.get('expired_at') or '').strip() or None,
+        'mailnest_started_at': str(order.get('started_at') or '').strip() or None,
+    }
+
+
+def format_mailnest_messages(raw_messages: List[Dict[str, Any]], email_addr: str) -> List[Dict[str, Any]]:
+    unified: List[Dict[str, Any]] = []
+    for index, msg in enumerate(raw_messages or []):
+        if not isinstance(msg, dict):
+            continue
+        body = str(msg.get('body') or '')
+        body_type = str(msg.get('body_type') or '').strip().lower()
+        has_html = body_type == 'html' or ('<' in body and '>' in body)
+        preview = str(msg.get('body_preview') or '')
+        code_match = str(msg.get('code_match') or '').strip()
+        content = preview or ('' if has_html else body)
+        if code_match:
+            content = f'验证码: {code_match}\n{content}'.strip()
+        from_addr = (
+            str(msg.get('from_email') or '').strip()
+            or str(msg.get('from_name') or '').strip()
+            or '未知'
+        )
+        message_id = str(msg.get('id') or '').strip() or f'mailnest-{email_addr}-{index}'
+        unified.append({
+            'id': message_id,
+            'from_address': from_addr,
+            'subject': str(msg.get('subject') or '无主题'),
+            'content': content,
+            'html_content': body if has_html else '',
+            'has_html': has_html,
+            'timestamp': parse_mailnest_timestamp(msg.get('received_at')),
+        })
+    return unified
+
+
+def format_mailnest_message_list(unified_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    formatted = []
+    for msg in unified_messages:
+        formatted.append({
+            'id': msg.get('id'),
+            'from': msg.get('from_address', '未知'),
+            'subject': msg.get('subject', '无主题'),
+            'body_preview': (msg.get('content', '') or '')[:200],
+            'date': msg.get('timestamp', 0),
+            'timestamp': msg.get('timestamp', 0),
+            'has_html': 1 if msg.get('has_html') else 0,
+        })
+    return formatted
+
+
+def update_mailnest_temp_email_fields(email_addr: str, fields: Dict[str, Any]) -> None:
+    db = get_db()
+    db.execute(
+        '''
+        UPDATE temp_emails
+        SET provider = 'mailnest',
+            mailnest_order_id = ?,
+            mailnest_sale_mode = ?,
+            mailnest_project_code = ?,
+            mailnest_project_name = ?,
+            mailnest_status = ?,
+            mailnest_billing_status = ?,
+            mailnest_expired_at = ?,
+            mailnest_started_at = ?
+        WHERE email = ?
+        ''',
+        (
+            fields.get('mailnest_order_id'),
+            fields.get('mailnest_sale_mode'),
+            fields.get('mailnest_project_code'),
+            fields.get('mailnest_project_name'),
+            fields.get('mailnest_status'),
+            fields.get('mailnest_billing_status'),
+            fields.get('mailnest_expired_at'),
+            fields.get('mailnest_started_at'),
+            email_addr,
+        ),
+    )
+    db.commit()
+
+
+def upsert_mailnest_temp_email(order: Dict[str, Any],
+                               fallback_sale_mode: str = 'temporary') -> tuple[str, Optional[int]]:
+    email_addr = normalize_email_address(order.get('email', ''))
+    if not email_addr or '@' not in email_addr:
+        return 'skipped', None
+
+    fields = extract_mailnest_order_fields(order, fallback_sale_mode=fallback_sale_mode)
+    existing = get_temp_email_by_address(email_addr)
+    if existing:
+        update_mailnest_temp_email_fields(email_addr, fields)
+        return 'updated', int(existing['id'])
+
+    if add_temp_email(
+        email_addr,
+        provider='mailnest',
+        mailnest_order_id=fields.get('mailnest_order_id'),
+        mailnest_sale_mode=fields.get('mailnest_sale_mode'),
+        mailnest_project_code=fields.get('mailnest_project_code'),
+        mailnest_project_name=fields.get('mailnest_project_name'),
+        mailnest_status=fields.get('mailnest_status'),
+        mailnest_billing_status=fields.get('mailnest_billing_status'),
+        mailnest_expired_at=fields.get('mailnest_expired_at'),
+        mailnest_started_at=fields.get('mailnest_started_at'),
+    ):
+        created = get_temp_email_by_address(email_addr)
+        return 'added', int(created['id']) if created else None
+    return 'skipped', None
+
+
+def fetch_mailnest_temp_messages(email_addr: str,
+                                 temp_email: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    result = mailnest_receive_messages(email_addr)
+    if not result.get('success'):
+        cached = get_temp_email_messages(email_addr)
+        if cached:
+            unified = [{
+                'id': msg.get('message_id'),
+                'from_address': msg.get('from_address', '未知'),
+                'subject': msg.get('subject', '无主题'),
+                'content': msg.get('content', ''),
+                'html_content': msg.get('html_content', ''),
+                'has_html': bool(msg.get('has_html')),
+                'timestamp': msg.get('timestamp', 0),
+            } for msg in cached]
+            return {
+                'success': True,
+                'messages': unified,
+                'method': 'MailNest',
+                'cached': True,
+                'error': result.get('error'),
+            }
+        return result
+
+    unified_messages = format_mailnest_messages(result.get('messages') or [], email_addr)
+    if unified_messages:
+        save_temp_email_messages(email_addr, unified_messages)
+        record = temp_email or get_temp_email_by_address(email_addr)
+        if record:
+            first = (result.get('messages') or [{}])[0] if result.get('messages') else {}
+            update_mailnest_temp_email_fields(email_addr, {
+                'mailnest_order_id': first.get('order_id') or record.get('mailnest_order_id'),
+                'mailnest_sale_mode': record.get('mailnest_sale_mode') or 'temporary',
+                'mailnest_project_code': record.get('mailnest_project_code'),
+                'mailnest_project_name': record.get('mailnest_project_name'),
+                'mailnest_status': 'having',
+                'mailnest_billing_status': 'charged',
+                'mailnest_expired_at': record.get('mailnest_expired_at'),
+                'mailnest_started_at': record.get('mailnest_started_at'),
+            })
+        return {'success': True, 'messages': unified_messages, 'method': 'MailNest'}
+
+    cached = get_temp_email_messages(email_addr)
+    unified = [{
+        'id': msg.get('message_id'),
+        'from_address': msg.get('from_address', '未知'),
+        'subject': msg.get('subject', '无主题'),
+        'content': msg.get('content', ''),
+        'html_content': msg.get('html_content', ''),
+        'has_html': bool(msg.get('has_html')),
+        'timestamp': msg.get('timestamp', 0),
+    } for msg in cached]
+    return {
+        'success': True,
+        'messages': unified,
+        'method': 'MailNest',
+        'pending': bool(result.get('pending')),
+        'error': result.get('error'),
+    }
+
+
+def generate_mailnest_temp_emails(sale_mode: str, count: int,
+                                  project_code: str = '',
+                                  tag_ids: Any = None) -> Dict[str, Any]:
+    buy_result = mailnest_buy_emails(sale_mode, count=count, project_code=project_code)
+    if not buy_result.get('success'):
+        return {
+            'success': False,
+            'error': mailnest_error_message(buy_result, '购买迈巢邮箱失败'),
+            'emails': [],
+            'created_count': 0,
+            'failed_count': count,
+            'failures': [{'index': 1, 'error': mailnest_error_message(buy_result, '购买迈巢邮箱失败')}],
+        }
+
+    created_emails: List[str] = []
+    created_ids: List[int] = []
+    failures: List[Dict[str, Any]] = []
+    fallback_sale_mode = buy_result.get('sale_mode') or normalize_mailnest_sale_mode(sale_mode)
+
+    for index, order in enumerate(buy_result.get('orders') or [], start=1):
+        status, temp_email_id = upsert_mailnest_temp_email(order, fallback_sale_mode=fallback_sale_mode)
+        email_addr = normalize_email_address((order or {}).get('email', ''))
+        if status in {'added', 'updated'} and email_addr:
+            if email_addr not in created_emails:
+                created_emails.append(email_addr)
+            if temp_email_id:
+                created_ids.append(temp_email_id)
+        else:
+            failures.append({
+                'index': index,
+                'email': email_addr,
+                'error': '保存迈巢邮箱失败',
+            })
+
+    tagged_count = bind_temp_email_tags(created_ids, tag_ids)
+    failed_count = max(count - len(created_emails), len(failures))
+    payload = {
+        'success': bool(created_emails),
+        'emails': created_emails,
+        'email': created_emails[0] if created_emails else '',
+        'created_count': len(created_emails),
+        'failed_count': failed_count,
+        'failures': failures,
+        'tagged_count': tagged_count,
+        'sale_mode': fallback_sale_mode,
+    }
+    if created_emails:
+        label = '独占邮箱' if fallback_sale_mode == 'exclusive' else '临时邮箱'
+        payload['message'] = f'已购买 {len(created_emails)} 个迈巢{label}'
+        return payload
+    payload['error'] = failures[0]['error'] if failures else '购买迈巢邮箱失败'
+    return payload
+
+
 # ==================== 临时邮箱数据库操作 ====================
 
 def normalize_cloudflare_channel_domains(value: Any) -> List[str]:
@@ -1387,20 +1829,39 @@ def add_temp_email(email_addr: str, provider: str = 'gptmail',
                    duckmail_token: str = None, duckmail_account_id: str = None,
                    duckmail_password: str = None,
                    cloudflare_address_id: str = None,
-                   cloudflare_channel_id: Optional[int] = None) -> bool:
+                   cloudflare_channel_id: Optional[int] = None,
+                   mailnest_order_id: str = None,
+                   mailnest_sale_mode: str = None,
+                   mailnest_project_code: str = None,
+                   mailnest_project_name: str = None,
+                   mailnest_status: str = None,
+                   mailnest_billing_status: str = None,
+                   mailnest_expired_at: str = None,
+                   mailnest_started_at: str = None) -> bool:
     """添加临时邮箱"""
     db = get_db()
     try:
         db.execute('''INSERT INTO temp_emails (
                         email, provider, duckmail_token, duckmail_account_id, duckmail_password,
-                        cloudflare_address_id, cloudflare_channel_id
-                      ) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                        cloudflare_address_id, cloudflare_channel_id,
+                        mailnest_order_id, mailnest_sale_mode, mailnest_project_code,
+                        mailnest_project_name, mailnest_status, mailnest_billing_status,
+                        mailnest_expired_at, mailnest_started_at
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                    (email_addr, provider,
                     encrypt_data(duckmail_token) if duckmail_token else None,
                     duckmail_account_id,
                     encrypt_data(duckmail_password) if duckmail_password else None,
                     cloudflare_address_id,
-                    cloudflare_channel_id))
+                    cloudflare_channel_id,
+                    mailnest_order_id,
+                    mailnest_sale_mode,
+                    mailnest_project_code,
+                    mailnest_project_name,
+                    mailnest_status,
+                    mailnest_billing_status,
+                    mailnest_expired_at,
+                    mailnest_started_at))
         db.commit()
         return True
     except sqlite3.IntegrityError:
@@ -1497,6 +1958,10 @@ def cleanup_temp_email_provider_resource(temp_email: Optional[Dict]) -> None:
             cloudflare_delete_address(address_id, channel=channel)
         else:
             cloudflare_delete_address_by_email(email_addr, channel=channel)
+    elif provider == 'mailnest':
+        billing_status = str(temp_email.get('mailnest_billing_status') or '').strip().lower()
+        if billing_status != 'charged':
+            mailnest_release_email(email_addr)
 
 
 def save_temp_email_messages(email_addr: str, messages: List[Dict]) -> int:
@@ -1925,6 +2390,20 @@ def api_import_temp_emails():
                     skipped += 1
                 if temp_email_id:
                     tagged_temp_email_ids.append(temp_email_id)
+            elif provider == 'mailnest':
+                email_addr = normalize_email_address(line)
+                if not email_addr or '@' not in email_addr:
+                    skipped += 1
+                    continue
+                status, temp_email_id = upsert_mailnest_temp_email({'email': email_addr})
+                if status == 'added':
+                    added += 1
+                elif status == 'updated':
+                    updated += 1
+                else:
+                    skipped += 1
+                if temp_email_id:
+                    tagged_temp_email_ids.append(temp_email_id)
             else:
                 # GPTMail 格式：每行一个邮箱地址
                 email_addr = line.strip()
@@ -2244,10 +2723,136 @@ def api_get_cloudflare_admin_messages():
     })
 
 
+@app.route('/api/mailnest/products', methods=['GET'])
+@login_required
+def api_get_mailnest_products():
+    """获取迈巢可购买项目、独占库存和账户余额。"""
+    products = mailnest_get_products()
+    if not products.get('success'):
+        return jsonify({'success': False, 'error': products.get('error', '获取迈巢产品失败')})
+
+    payload = {
+        'success': True,
+        'temporary': products.get('temporary', []),
+        'exclusive': products.get('exclusive', {}),
+        'api_key_configured': bool((get_mailnest_api_key() or '').strip()),
+        'base_url': get_mailnest_base_url(),
+    }
+    if payload['api_key_configured']:
+        balance = mailnest_get_balance()
+        if balance.get('success'):
+            payload['balance'] = {
+                'balance': balance.get('balance'),
+                'frozen_balance': balance.get('frozen_balance'),
+                'available_balance': balance.get('available_balance'),
+            }
+        else:
+            payload['balance_error'] = balance.get('error', '获取迈巢余额失败')
+    return jsonify(payload)
+
+
+@app.route('/api/mailnest/balance', methods=['GET'])
+@login_required
+def api_get_mailnest_balance():
+    """获取迈巢账户余额。"""
+    result = mailnest_get_balance()
+    if not result.get('success'):
+        return jsonify({'success': False, 'error': result.get('error', '获取迈巢余额失败')})
+    return jsonify(result)
+
+
+@app.route('/api/temp-emails/import-mailnest', methods=['POST'])
+@login_required
+def api_import_mailnest_orders():
+    """从迈巢账户同步已购买的临时/独占邮箱。"""
+    data = request.json or {}
+    tag_ids = data.get('tag_ids', [])
+    sale_mode_filter = str(data.get('sale_mode') or '').strip().lower()
+    modes = ['temporary', 'exclusive']
+    if sale_mode_filter in modes:
+        modes = [sale_mode_filter]
+
+    added = 0
+    updated = 0
+    skipped = 0
+    errors: List[str] = []
+    tagged_temp_email_ids: List[int] = []
+    page_size = 100
+    max_pages = 100
+
+    for sale_mode in modes:
+        page = 1
+        imported_for_mode = 0
+        while page <= max_pages:
+            result = mailnest_list_orders(sale_mode, page=page, page_size=page_size)
+            if not result.get('success'):
+                errors.append(result.get('error') or f'获取迈巢{sale_mode}邮箱失败')
+                break
+            items = result.get('items') or []
+            if not items:
+                break
+            for order in items:
+                status, temp_email_id = upsert_mailnest_temp_email(order, fallback_sale_mode=sale_mode)
+                if status == 'added':
+                    added += 1
+                elif status == 'updated':
+                    updated += 1
+                else:
+                    skipped += 1
+                if temp_email_id:
+                    tagged_temp_email_ids.append(temp_email_id)
+                imported_for_mode += 1
+            total = result.get('total') or 0
+            try:
+                total_count = int(total)
+            except (TypeError, ValueError):
+                total_count = 0
+            if len(items) < page_size or (total_count and imported_for_mode >= total_count):
+                break
+            page += 1
+        if page > max_pages:
+            errors.append(f'迈巢{sale_mode}邮箱已达到最大分页限制')
+
+    total = added + updated
+    if total <= 0:
+        error = '没有可同步的迈巢邮箱'
+        if errors:
+            error = '；'.join(errors[:3])
+        return jsonify({
+            'success': False,
+            'error': error,
+            'added_count': added,
+            'updated_count': updated,
+            'skipped_count': skipped,
+            'errors': errors,
+        })
+
+    tagged_count = bind_temp_email_tags(tagged_temp_email_ids, tag_ids)
+    message = f'同步 {added} 个新迈巢邮箱'
+    if updated:
+        message += f'，更新 {updated} 个已有邮箱'
+    if skipped:
+        message += f'，跳过 {skipped} 个'
+    if tagged_count:
+        message += f'，绑定标签 {tagged_count} 个邮箱'
+    if errors:
+        message += f'，{len(errors)} 个错误：' + '；'.join(errors[:3])
+    log_audit('import', 'temp_emails', None, f'从迈巢同步 {added} 个新临时邮箱，更新 {updated} 个已有邮箱')
+    return jsonify({
+        'success': True,
+        'message': message,
+        'added_count': added,
+        'updated_count': updated,
+        'skipped_count': skipped,
+        'tagged_count': tagged_count,
+        'errors': errors,
+    })
+
+
 @app.route('/api/temp-emails/generate', methods=['POST'])
 @login_required
 def api_generate_temp_email():
-    """生成新的临时邮箱（支持 GPTMail、DuckMail 和 Cloudflare）"""
+    """生成新的临时邮箱（支持 GPTMail、DuckMail、Cloudflare 和迈巢）"""
     data = request.json or {}
     provider = data.get('provider', 'gptmail')
 
@@ -2336,6 +2941,17 @@ def api_generate_temp_email():
         ):
             return jsonify({'success': True, 'email': email_addr, 'message': 'Cloudflare 临时邮箱创建成功'})
         return jsonify({'success': False, 'error': '邮箱已存在'})
+    elif provider == 'mailnest':
+        count = normalize_mailnest_buy_count(data.get('count', 1))
+        if count is None:
+            return jsonify({'success': False, 'error': f'数量必须在 1-{MAILNEST_BUY_MAX_COUNT} 之间'})
+        payload = generate_mailnest_temp_emails(
+            sale_mode=data.get('sale_mode', 'temporary'),
+            count=count,
+            project_code=data.get('project_code', ''),
+            tag_ids=data.get('tag_ids', []),
+        )
+        return jsonify(payload)
     else:
         # GPTMail: 保持原有逻辑
         prefix = data.get('prefix')
@@ -2408,8 +3024,18 @@ def api_generate_cloudflare_ai_usernames():
 def api_generate_temp_emails_batch():
     data = request.json or {}
     provider = data.get('provider', 'cloudflare')
+    if provider == 'mailnest':
+        count = normalize_mailnest_buy_count(data.get('count', 1))
+        if count is None:
+            return jsonify({'success': False, 'error': f'数量必须在 1-{MAILNEST_BUY_MAX_COUNT} 之间'})
+        return jsonify(generate_mailnest_temp_emails(
+            sale_mode=data.get('sale_mode', 'temporary'),
+            count=count,
+            project_code=data.get('project_code', ''),
+            tag_ids=data.get('tag_ids', []),
+        ))
     if provider != 'cloudflare':
-        return jsonify({'success': False, 'error': '批量生成暂仅支持 Cloudflare 临时邮箱'})
+        return jsonify({'success': False, 'error': '批量生成暂仅支持 Cloudflare 和迈巢临时邮箱'})
 
     count = normalize_cloudflare_batch_count(data.get('count', 1))
     if count is None:
@@ -2599,6 +3225,20 @@ def api_get_temp_email_messages(email_addr):
             'count': len(formatted),
             'method': fetch_result.get('method', 'Cloudflare')
         })
+    elif provider == 'mailnest':
+        fetch_result = fetch_mailnest_temp_messages(email_addr, temp_email)
+        if not fetch_result.get('success'):
+            return jsonify({'success': False, 'error': fetch_result.get('error', '获取迈巢邮件失败')})
+        unified_messages = fetch_result.get('messages', [])
+        formatted = format_mailnest_message_list(unified_messages)
+        return jsonify({
+            'success': True,
+            'emails': formatted,
+            'count': len(formatted),
+            'method': fetch_result.get('method', 'MailNest'),
+            'pending': bool(fetch_result.get('pending')),
+            'warning': fetch_result.get('error') or '',
+        })
     else:
         # GPTMail: 保持原有逻辑
         api_messages = get_temp_emails_from_api(email_addr)
@@ -2706,6 +3346,28 @@ def api_get_temp_email_message_detail(email_addr, message_id):
             save_temp_email_messages(email_addr, fetch_result.get('messages', []))
             msg = get_temp_email_message_by_id(message_id)
 
+        if msg:
+            return jsonify({
+                'success': True,
+                'email': {
+                    'id': msg.get('message_id'),
+                    'from': msg.get('from_address', '未知'),
+                    'to': email_addr,
+                    'subject': msg.get('subject', '无主题'),
+                    'body': msg.get('html_content') if msg.get('has_html') else msg.get('content', ''),
+                    'body_type': 'html' if msg.get('has_html') else 'text',
+                    'date': msg.get('created_at', ''),
+                    'timestamp': msg.get('timestamp', 0)
+                }
+            })
+        return jsonify({'success': False, 'error': '邮件不存在'})
+    elif provider == 'mailnest':
+        msg = get_temp_email_message_by_id(message_id)
+        if not msg:
+            fetch_result = fetch_mailnest_temp_messages(email_addr, temp_email)
+            if not fetch_result.get('success'):
+                return jsonify({'success': False, 'error': fetch_result.get('error', '获取迈巢邮件失败')})
+            msg = get_temp_email_message_by_id(message_id)
         if msg:
             return jsonify({
                 'success': True,
@@ -2844,6 +3506,21 @@ def api_refresh_temp_email_messages(email_addr):
             'count': len(formatted),
             'new_count': saved,
             'method': fetch_result.get('method', 'Cloudflare')
+        })
+    elif provider == 'mailnest':
+        fetch_result = fetch_mailnest_temp_messages(email_addr, temp_email)
+        if not fetch_result.get('success'):
+            return jsonify({'success': False, 'error': fetch_result.get('error', '获取迈巢邮件失败')})
+        unified_messages = fetch_result.get('messages', [])
+        formatted = format_mailnest_message_list(unified_messages)
+        return jsonify({
+            'success': True,
+            'emails': formatted,
+            'count': len(formatted),
+            'new_count': len(unified_messages),
+            'method': fetch_result.get('method', 'MailNest'),
+            'pending': bool(fetch_result.get('pending')),
+            'warning': fetch_result.get('error') or '',
         })
     else:
         # GPTMail: 保持原有逻辑

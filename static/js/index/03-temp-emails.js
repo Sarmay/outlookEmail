@@ -5,8 +5,63 @@
         const CLOUDFLARE_GLOBAL_ACCOUNT_KEY = '__cloudflare_global_messages__';
         const CLOUDFLARE_GLOBAL_ACCOUNT_PREFIX = `${CLOUDFLARE_GLOBAL_ACCOUNT_KEY}:`;
         const CLOUDFLARE_GLOBAL_PAGE_SIZE = 50;
+        const MAILNEST_BUY_MAX_COUNT = 100;
         let currentCloudflareGlobalChannelId = null;
         let currentCloudflareGlobalChannelName = '';
+        let currentMailnestSaleMode = 'temporary';
+
+        function getTempEmailProviderMeta(provider) {
+            if (provider === 'duckmail') {
+                return { key: 'duckmail', label: 'DuckMail', color: '#ff9800' };
+            }
+            if (provider === 'cloudflare') {
+                return { key: 'cloudflare', label: 'Cloudflare', color: '#f48120' };
+            }
+            if (provider === 'mailnest') {
+                return { key: 'mailnest', label: '迈巢', color: '#0d9488' };
+            }
+            return { key: 'gptmail', label: 'GPTMail', color: '#00bcf2' };
+        }
+
+        function getTempEmailMethodMeta(method) {
+            const normalized = String(method || '').toLowerCase();
+            if (normalized === 'duckmail') {
+                return getTempEmailProviderMeta('duckmail');
+            }
+            if (normalized === 'cloudflare' || normalized === 'cloudflare admin') {
+                return getTempEmailProviderMeta('cloudflare');
+            }
+            if (normalized === 'mailnest' || normalized === '迈巢') {
+                return getTempEmailProviderMeta('mailnest');
+            }
+            return getTempEmailProviderMeta('gptmail');
+        }
+
+        function formatMailnestDuration(seconds) {
+            const value = Number(seconds);
+            if (!Number.isFinite(value) || value <= 0) return '';
+            if (value % 3600 === 0) return `${value / 3600} 小时`;
+            if (value % 60 === 0) return `${value / 60} 分钟`;
+            return `${value} 秒`;
+        }
+
+        function formatMailnestExpiry(expiredAt) {
+            if (!expiredAt) return '';
+            const date = new Date(expiredAt);
+            if (Number.isNaN(date.getTime())) return String(expiredAt);
+            if (date.getTime() < Date.now()) return '已到期';
+            return typeof formatDate === 'function' ? formatDate(expiredAt) : date.toLocaleString();
+        }
+
+        function getMailnestStatusLabel(email) {
+            const billing = String(email?.mailnest_billing_status || '').toLowerCase();
+            const status = String(email?.mailnest_status || '').toLowerCase();
+            if (billing === 'charged') return '已扣费';
+            if (status === 'holding') return '占用中';
+            const expiry = formatMailnestExpiry(email?.mailnest_expired_at);
+            if (expiry === '已到期') return '已到期';
+            return '';
+        }
 
         function setTempEmailListLoadingState(isLoading) {
             if (typeof setEmailListLoadingState === 'function') {
@@ -119,7 +174,7 @@
                 : [];
 
             if (filtered.length === 0 && cloudflareGlobalEntries.length === 0) {
-                const providerName = filter === 'duckmail' ? 'DuckMail' : (filter === 'cloudflare' ? 'Cloudflare' : 'GPTMail');
+                const providerName = getTempEmailProviderMeta(filter).label;
                 const hasAdvancedFilters = !!searchQuery || hasActiveTagFilters();
                 const hint = hasAdvancedFilters
                     ? '未找到匹配的临时邮箱'
@@ -173,11 +228,14 @@
                         </div>
                         <div class="account-meta-row">
                             <span class="account-status-pill provider"
-                                style="--pill-accent: ${email.provider === 'duckmail' ? '#ff9800' : (email.provider === 'cloudflare' ? '#f48120' : '#00bcf2')}">
-                                ${escapeHtml(email.provider === 'duckmail' ? 'DuckMail' : (email.provider === 'cloudflare' ? 'Cloudflare' : 'GPTMail'))}
+                                style="--pill-accent: ${getTempEmailProviderMeta(email.provider).color}">
+                                ${escapeHtml(getTempEmailProviderMeta(email.provider).label)}
                             </span>
-                            <span class="account-status-pill muted">临时邮箱</span>
+                            <span class="account-status-pill muted">${email.provider === 'mailnest' && email.mailnest_sale_mode === 'exclusive' ? '独占邮箱' : '临时邮箱'}</span>
                             ${email.provider === 'cloudflare' && email.cloudflare_channel_name ? `<span class="account-status-pill muted">${escapeHtml(email.cloudflare_channel_name)}</span>` : ''}
+                            ${email.provider === 'mailnest' && email.mailnest_project_name ? `<span class="account-status-pill muted">${escapeHtml(email.mailnest_project_name)}</span>` : ''}
+                            ${email.provider === 'mailnest' && getMailnestStatusLabel(email) ? `<span class="account-status-pill muted">${escapeHtml(getMailnestStatusLabel(email))}</span>` : ''}
+                            ${email.provider === 'mailnest' && email.mailnest_expired_at ? `<span class="account-status-pill muted">${escapeHtml(formatMailnestExpiry(email.mailnest_expired_at))}</span>` : ''}
                         </div>
                         ${(email.tags || []).length ? `<div class="account-tags">${renderAccountTagSummary(email.tags)}</div>` : ''}
                     </div>
@@ -297,6 +355,16 @@
                                             <span>DuckMail</span>
                                         </label>
                                     </div>
+                                    <div class="provider-tab-item">
+                                        <input type="radio" id="providerMailnest" name="tempEmailProvider" value="mailnest" onchange="toggleTempEmailProvider('mailnest')">
+                                        <label class="provider-tab-label" for="providerMailnest" id="providerLabelMailnest">
+                                            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M3 9l9-6 9 6v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                                <polyline points="9 22 9 12 15 12 15 22"/>
+                                            </svg>
+                                            <span>迈巢</span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                             <div id="gptmailFields">
@@ -383,6 +451,40 @@
                                     </div>
                                 </div>
                             </div>
+                            <div id="mailnestFields" style="display: none;">
+                                <div class="form-hint" id="mailnestBalanceHint" style="margin-bottom: 12px;">加载迈巢项目与余额...</div>
+                                <div class="form-group">
+                                    <label class="form-label">购买类型</label>
+                                    <div class="username-mode-selector">
+                                        <button type="button" class="btn btn-secondary active" id="mailnestModeTemporary" onclick="toggleMailnestSaleMode('temporary')">临时邮箱</button>
+                                        <button type="button" class="btn btn-secondary" id="mailnestModeExclusive" onclick="toggleMailnestSaleMode('exclusive')">独占邮箱</button>
+                                    </div>
+                                    <div class="form-hint">临时邮箱按项目匹配发件域名或关键词后才会返回并扣费；未取到可释放退回冻结金额。</div>
+                                </div>
+                                <div class="form-group" id="mailnestProjectGroup">
+                                    <label class="form-label">项目</label>
+                                    <select class="form-input" id="mailnestProjectCode" style="width: 100%;" onchange="updateMailnestProjectHint()">
+                                        <option value="">加载中...</option>
+                                    </select>
+                                    <div class="form-hint" id="mailnestProjectHint"></div>
+                                </div>
+                                <div class="form-grid-2">
+                                    <div class="form-group">
+                                        <label class="form-label">数量</label>
+                                        <input type="number" class="form-input" id="mailnestGenerateCount" min="1" max="100" value="1" style="width: 100%;">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">独占库存</label>
+                                        <div class="form-hint" id="mailnestExclusiveHint" style="padding-top: 10px;">-</div>
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin-bottom: 4px;">
+                                    <label class="form-label">绑定标签</label>
+                                    <div class="tag-cloud" id="mailnestGenerateTagOptions">
+                                        <div class="tag-cloud-empty">暂无标签</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="modal-footer">
                             <button class="btn btn-secondary" onclick="hideTempEmailProviderModal()">取消</button>
@@ -409,29 +511,36 @@
             const gptmailFields = document.getElementById('gptmailFields');
             const duckmailFields = document.getElementById('duckmailFields');
             const cloudflareFields = document.getElementById('cloudflareFields');
+            const mailnestFields = document.getElementById('mailnestFields');
             const labelGpt = document.getElementById('providerLabelGptmail');
             const labelDuck = document.getElementById('providerLabelDuckmail');
             const labelCloudflare = document.getElementById('providerLabelCloudflare');
+            const labelMailnest = document.getElementById('providerLabelMailnest');
 
             labelGpt?.classList.toggle('active', provider === 'gptmail');
             labelDuck?.classList.toggle('active', provider === 'duckmail');
             labelCloudflare?.classList.toggle('active', provider === 'cloudflare');
+            labelMailnest?.classList.toggle('active', provider === 'mailnest');
+
+            if (gptmailFields) gptmailFields.style.display = 'none';
+            if (duckmailFields) duckmailFields.style.display = 'none';
+            if (cloudflareFields) cloudflareFields.style.display = 'none';
+            if (mailnestFields) mailnestFields.style.display = 'none';
 
             if (provider === 'duckmail') {
-                gptmailFields.style.display = 'none';
-                duckmailFields.style.display = 'block';
-                cloudflareFields.style.display = 'none';
+                if (duckmailFields) duckmailFields.style.display = 'block';
                 loadDuckmailDomains();
             } else if (provider === 'cloudflare') {
-                gptmailFields.style.display = 'none';
-                duckmailFields.style.display = 'none';
-                cloudflareFields.style.display = 'block';
+                if (cloudflareFields) cloudflareFields.style.display = 'block';
                 loadCloudflareChannelsForGenerate();
                 ensureCloudflareGenerateTagsLoaded();
-            } else {
+            } else if (provider === 'mailnest') {
+                if (mailnestFields) mailnestFields.style.display = 'block';
+                toggleMailnestSaleMode(currentMailnestSaleMode || 'temporary');
+                loadMailnestGenerateOptions();
+                ensureMailnestGenerateTagsLoaded();
+            } else if (gptmailFields) {
                 gptmailFields.style.display = 'block';
-                duckmailFields.style.display = 'none';
-                cloudflareFields.style.display = 'none';
             }
         }
 
@@ -548,6 +657,141 @@
                 .filter(Number.isFinite);
         }
 
+        function toggleMailnestSaleMode(mode) {
+            currentMailnestSaleMode = mode === 'exclusive' ? 'exclusive' : 'temporary';
+            document.getElementById('mailnestModeTemporary')?.classList.toggle('active', currentMailnestSaleMode === 'temporary');
+            document.getElementById('mailnestModeExclusive')?.classList.toggle('active', currentMailnestSaleMode === 'exclusive');
+            const projectGroup = document.getElementById('mailnestProjectGroup');
+            if (projectGroup) {
+                projectGroup.style.display = currentMailnestSaleMode === 'temporary' ? 'block' : 'none';
+            }
+            updateMailnestProjectHint();
+        }
+
+        async function loadMailnestGenerateOptions() {
+            const hint = document.getElementById('mailnestBalanceHint');
+            const projectSelect = document.getElementById('mailnestProjectCode');
+            const exclusiveHint = document.getElementById('mailnestExclusiveHint');
+            if (hint) hint.textContent = '加载迈巢项目与余额...';
+            if (projectSelect) projectSelect.innerHTML = '<option value="">加载中...</option>';
+            try {
+                const response = await fetch('/api/mailnest/products');
+                const data = await response.json();
+                accountsCache.mailnestProducts = data;
+                if (!data.success) {
+                    if (hint) hint.textContent = data.error || '加载迈巢项目失败';
+                    if (projectSelect) projectSelect.innerHTML = `<option value="">${escapeHtml(data.error || '加载失败')}</option>`;
+                    return;
+                }
+                const temporary = Array.isArray(data.temporary) ? data.temporary : [];
+                const previous = projectSelect?.value || '';
+                if (projectSelect) {
+                    if (!temporary.length) {
+                        projectSelect.innerHTML = '<option value="">暂无可用项目</option>';
+                    } else {
+                        projectSelect.innerHTML = temporary.map(project => {
+                            const code = escapeHtml(String(project.code || ''));
+                            const name = escapeHtml(String(project.name || project.code || ''));
+                            const stock = Number.isFinite(Number(project.stock)) ? Number(project.stock) : 0;
+                            const price = escapeHtml(String(project.price || ''));
+                            return `<option value="${code}" data-stock="${stock}" data-price="${price}" data-duration="${escapeHtml(String(project.duration_seconds || ''))}" data-sender="${escapeHtml(String(project.sender_domains || ''))}" data-keywords="${escapeHtml(String(project.mail_keywords || ''))}">${name} · ¥${price} · 库存 ${stock}</option>`;
+                        }).join('');
+                        if (previous && temporary.some(project => String(project.code) === previous)) {
+                            projectSelect.value = previous;
+                        }
+                    }
+                }
+                const exclusive = data.exclusive || {};
+                if (exclusiveHint) {
+                    exclusiveHint.textContent = exclusive.price
+                        ? `¥${exclusive.price} · 库存 ${exclusive.stock ?? '-'}`
+                        : '未返回独占库存';
+                }
+                if (hint) {
+                    if (data.balance) {
+                        hint.textContent = `可用余额 ¥${data.balance.available_balance || '0'} · 冻结 ¥${data.balance.frozen_balance || '0'} · 总额 ¥${data.balance.balance || '0'}`;
+                    } else if (data.balance_error) {
+                        hint.textContent = data.api_key_configured
+                            ? `项目已加载，余额获取失败：${data.balance_error}`
+                            : '请先在设置中填写迈巢 API Key';
+                    } else if (!data.api_key_configured) {
+                        hint.textContent = '请先在设置中填写迈巢 API Key';
+                    } else {
+                        hint.textContent = '迈巢项目已加载';
+                    }
+                }
+                updateMailnestProjectHint();
+            } catch (error) {
+                if (hint) hint.textContent = '加载迈巢项目失败';
+                if (projectSelect) projectSelect.innerHTML = '<option value="">加载失败</option>';
+            }
+        }
+
+        function updateMailnestProjectHint() {
+            const hint = document.getElementById('mailnestProjectHint');
+            const select = document.getElementById('mailnestProjectCode');
+            if (!hint || !select) return;
+            if (currentMailnestSaleMode === 'exclusive') {
+                hint.textContent = '独占邮箱购买后仅属于当前账户，可多次取件。';
+                return;
+            }
+            const option = select.options[select.selectedIndex];
+            if (!option || !option.value) {
+                hint.textContent = '请选择要接收验证码的目标项目。';
+                return;
+            }
+            const duration = formatMailnestDuration(option.dataset.duration);
+            const sender = option.dataset.sender || '';
+            const keywords = option.dataset.keywords || '';
+            const parts = [];
+            if (duration) parts.push(`占用 ${duration}`);
+            if (sender) parts.push(`发件域名 ${sender}`);
+            if (keywords) parts.push(`关键词 ${keywords}`);
+            hint.textContent = parts.join(' · ') || '购买后请尽快用该邮箱接收目标邮件。';
+        }
+
+        async function ensureMailnestGenerateTagsLoaded() {
+            const tags = typeof allTags === 'undefined' || !Array.isArray(allTags) ? [] : allTags;
+            if (typeof loadTags === 'function' && tags.length === 0) {
+                await loadTags();
+            }
+            renderMailnestGenerateTagOptions();
+        }
+
+        function renderMailnestGenerateTagOptions() {
+            const container = document.getElementById('mailnestGenerateTagOptions');
+            if (!container) return;
+            const tags = typeof allTags === 'undefined' || !Array.isArray(allTags) ? [] : allTags;
+            if (!tags.length) {
+                container.innerHTML = '<div class="tag-cloud-empty">暂无标签</div>';
+                return;
+            }
+            container.innerHTML = tags.map(tag => {
+                const color = tag.color || '#9ca3af';
+                let bgStyle = '';
+                if (color.startsWith('#')) {
+                    bgStyle = `--dot-color: ${color}; --tag-bg: ${color}15; --tag-color: ${color}; --tag-border: ${color}40;`;
+                } else {
+                    bgStyle = `--dot-color: ${color}; --tag-bg: rgba(156, 163, 175, 0.1); --tag-color: #374151; --tag-border: #e2e8f0;`;
+                }
+                return `
+                    <label class="tag-badge-item" style="${bgStyle}">
+                        <input type="checkbox" class="mailnest-generate-tag-checkbox" value="${escapeHtml(String(tag.id))}">
+                        <span class="tag-badge-label">
+                            <span class="tag-badge-dot"></span>
+                            <span>${escapeHtml(tag.name || '')}</span>
+                        </span>
+                    </label>
+                `;
+            }).join('');
+        }
+
+        function getMailnestGenerateSelectedTagIds() {
+            return Array.from(document.querySelectorAll('.mailnest-generate-tag-checkbox:checked'))
+                .map(checkbox => parseInt(checkbox.value, 10))
+                .filter(Number.isFinite);
+        }
+
         function getCloudflareUsernameLines() {
             const textarea = document.getElementById('cloudflareUsername');
             return (textarea?.value || '')
@@ -653,10 +897,25 @@
                         showToast('用户名数量必须与创建数量一致', 'error');
                         return;
                     }
+                } else if (provider === 'mailnest') {
+                    body.sale_mode = currentMailnestSaleMode || 'temporary';
+                    body.count = parseInt(document.getElementById('mailnestGenerateCount')?.value || '1', 10);
+                    body.tag_ids = getMailnestGenerateSelectedTagIds();
+                    if (body.sale_mode === 'temporary') {
+                        body.project_code = document.getElementById('mailnestProjectCode')?.value || '';
+                        if (!body.project_code) {
+                            showToast('请选择迈巢项目', 'error');
+                            return;
+                        }
+                    }
+                    if (Number.isNaN(body.count) || body.count < 1 || body.count > MAILNEST_BUY_MAX_COUNT) {
+                        showToast(`数量必须在 1-${MAILNEST_BUY_MAX_COUNT} 之间`, 'error');
+                        return;
+                    }
                 }
 
-                const useCloudflareBatch = provider === 'cloudflare';
-                const response = await fetch(useCloudflareBatch ? '/api/temp-emails/generate-batch' : '/api/temp-emails/generate', {
+                const useBatch = provider === 'cloudflare' || provider === 'mailnest';
+                const response = await fetch(useBatch ? '/api/temp-emails/generate-batch' : '/api/temp-emails/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
@@ -665,12 +924,12 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    if (useCloudflareBatch) {
+                    if (useBatch) {
                         const failedText = data.failed_count ? `，失败 ${data.failed_count} 个` : '';
                         const failureSummary = formatCloudflareBatchFailureSummary(data.failures);
                         const failureSummaryText = failureSummary ? `：${failureSummary}` : '';
                         showToast(
-                            `已生成 ${data.created_count || 0} 个临时邮箱${failedText}${failureSummaryText}`,
+                            data.message || `已生成 ${data.created_count || 0} 个临时邮箱${failedText}${failureSummaryText}`,
                             data.failed_count ? 'warning' : 'success'
                         );
                     } else {
@@ -1100,17 +1359,17 @@
 
                 if (data.success) {
                     currentEmails = data.emails;
-                    currentMethod = data.method === 'DuckMail'
-                        ? 'duckmail'
-                        : (data.method === 'Cloudflare' ? 'cloudflare' : 'gptmail');
+                    const methodMeta = getTempEmailMethodMeta(data.method);
+                    currentMethod = methodMeta.key;
 
                     const methodTag = document.getElementById('methodTag');
-                    methodTag.textContent = data.method || 'GPTMail';
+                    methodTag.textContent = data.method || methodMeta.label;
                     methodTag.style.display = 'inline';
-                    methodTag.style.backgroundColor = data.method === 'DuckMail'
-                        ? '#ff9800'
-                        : (data.method === 'Cloudflare' ? '#f48120' : '#00bcf2');
+                    methodTag.style.backgroundColor = methodMeta.color;
                     methodTag.style.color = 'white';
+                    if (data.warning) {
+                        showToast(data.warning, 'warning');
+                    }
 
                     document.getElementById('emailCount').textContent = `(${data.count})`;
 

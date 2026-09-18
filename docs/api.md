@@ -129,13 +129,16 @@
 | POST | `/api/temp-emails/batch-delete` | Session + CSRF | JSON | 批量删除临时邮箱 |
 | POST | `/api/temp-emails/tags` | Session + CSRF | JSON | 批量改临时邮箱标签 |
 | GET | `/api/duckmail/domains` | Session | JSON | 获取 DuckMail 域名 |
+| GET | `/api/mailnest/products` | Session | JSON | 获取迈巢项目、独占库存和余额 |
+| GET | `/api/mailnest/balance` | Session | JSON | 获取迈巢账户余额 |
 | GET | `/api/cloudflare/channels` | Session | JSON | 获取 Cloudflare 渠道列表 |
 | POST | `/api/cloudflare/channels` | Session + CSRF | JSON | 创建 Cloudflare 渠道 |
 | PUT | `/api/cloudflare/channels/<id>` | Session + CSRF | JSON | 更新 Cloudflare 渠道 |
 | DELETE | `/api/cloudflare/channels/<id>` | Session + CSRF | JSON | 删除未被临时邮箱引用的 Cloudflare 渠道 |
 | GET | `/api/cloudflare/domains` | Session | JSON | 获取指定 Cloudflare 渠道域名 |
 | POST | `/api/temp-emails/generate` | Session + CSRF | JSON | 生成临时邮箱 |
-| POST | `/api/temp-emails/generate-batch` | Session + CSRF | JSON | 批量生成 Cloudflare 临时邮箱 |
+| POST | `/api/temp-emails/generate-batch` | Session + CSRF | JSON | 批量生成 Cloudflare 或迈巢临时邮箱 |
+| POST | `/api/temp-emails/import-mailnest` | Session + CSRF | JSON | 从迈巢账户同步已购买邮箱 |
 | POST | `/api/cloudflare/ai-usernames/test` | Session + CSRF | JSON | 使用草稿配置测试 AI 用户名生成 |
 | POST | `/api/cloudflare/ai-usernames/generate` | Session + CSRF | JSON | 使用已保存配置生成 Cloudflare 用户名列表 |
 | DELETE | `/api/temp-emails/<email_addr>` | Session + CSRF | JSON | 删除临时邮箱 |
@@ -1998,6 +2001,9 @@ ZIP 内文件名使用附件原始文件名；如果多个附件同名，会自�
 | POST | `/api/temp-emails/import` | JSON: `account_string`、`provider`、`tag_ids?` | 批量导入临时邮箱；Cloudflare 导入成功的邮箱可同步绑定标签 |
 | POST | `/api/temp-emails/batch-delete` | JSON: `temp_email_ids` | 批量删除临时邮箱 |
 | GET | `/api/duckmail/domains` | 无 | 获取 DuckMail 可用域名 |
+| GET | `/api/mailnest/products` | 无 | 获取迈巢可购买临时项目、独占库存；已配置 API Key 时附带余额 |
+| GET | `/api/mailnest/balance` | 无 | 查询迈巢账户余额、冻结余额和可用余额 |
+| POST | `/api/temp-emails/import-mailnest` | JSON: `sale_mode?`、`tag_ids?` | 从迈巢账户分页同步已购买的临时/独占邮箱 |
 | GET | `/api/cloudflare/channels` | 无 | 获取 Cloudflare 渠道列表 |
 | POST | `/api/cloudflare/channels` | JSON: 渠道配置 | 创建 Cloudflare 渠道 |
 | PUT | `/api/cloudflare/channels/<id>` | JSON: 渠道配置 | 更新 Cloudflare 渠道 |
@@ -2015,6 +2021,7 @@ ZIP 内文件名使用附件原始文件名；如果多个附件同名，会自�
 - `provider=gptmail`: 每行一个邮箱
 - `provider=duckmail`: 每行 `邮箱----密码`
 - `provider=cloudflare`: 每行一个邮箱地址，使用请求中的 `cloudflare_channel_id` 绑定渠道；所有 Cloudflare 邮箱统一通过渠道管理员 API 管理，不再使用 JWT；兼容旧格式 `邮箱----JWT`，会自动提取邮箱部分
+- `provider=mailnest`: 每行一个已购买的迈巢邮箱地址；账户同步请使用 `/api/temp-emails/import-mailnest`
 
 ### POST `/api/temp-emails/generate`
 
@@ -2027,6 +2034,7 @@ ZIP 内文件名使用附件原始文件名；如果多个附件同名，会自�
 | `gptmail` | `prefix?`、`domain?` | 不传则走默认随机生成 |
 | `duckmail` | `domain`、`username`、`password` | 用户名至少 3 位，密码至少 6 位 |
 | `cloudflare` | `channel_id`、`domain?`、`username?` | `channel_id` 指定 Cloudflare 渠道；`username` 可留空随机生成 |
+| `mailnest` | `sale_mode`、`project_code?`、`count?`、`tag_ids?` | `sale_mode` 为 `temporary` 或 `exclusive`；临时邮箱必须传 `project_code`；`count` 范围 `1-100` |
 
 #### 请求示例
 
@@ -2041,18 +2049,22 @@ ZIP 内文件名使用附件原始文件名；如果多个附件同名，会自�
 
 ### POST `/api/temp-emails/generate-batch`
 
-批量生成 Cloudflare 临时邮箱。当前仅支持 `provider=cloudflare`。
+批量生成 Cloudflare 或迈巢临时邮箱。
 
 #### 请求体
 
+Cloudflare：
+
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `provider` | string | 是 | 固定为 `cloudflare` |
+| `provider` | string | 是 | `cloudflare` 或 `mailnest` |
 | `count` | int | 是 | 创建数量，范围 `1-50` |
 | `channel_id` | int/string | 否 | Cloudflare 渠道 ID；不传时使用默认渠道 |
 | `domain` | string | 否 | 指定邮箱域名；不传时使用渠道第一个域名 |
 | `usernames` | array<string> | 否 | 显式用户名列表。空或不传时随机生成；非空时清洗后数量必须等于 `count`，且不能重复 |
 | `tag_ids` | array<int> | 否 | 为成功创建的临时邮箱绑定存在的标签 |
+
+迈巢：`provider=mailnest`，字段为 `sale_mode`、`project_code?`、`count`（`1-100`）、`tag_ids?`。一次调用会向迈巢购买对应数量邮箱并写入本地临时邮箱列表。成功取到目标邮件后迈巢才会扣费；删除未扣费邮箱时会尝试调用迈巢释放接口。
 
 用户名清洗规则：转小写；含 `@` 时取 `@` 前缀；删除所有非 `a-z0-9` 字符；清洗后长度必须至少 3；最多保留 32 个字符。
 
@@ -2250,6 +2262,8 @@ POST /api/cloudflare/channels
 | `external_api_key` | 当前对外 API Key |
 | `duckmail_base_url` | DuckMail API 地址 |
 | `duckmail_api_key` | DuckMail API Key |
+| `mailnest_base_url` | 迈巢 MailNest API 地址 |
+| `mailnest_api_key` | 迈巢 MailNest API Key |
 | `cloudflare_worker_domain` | 旧单渠道 Cloudflare Worker 域名，主要用于升级迁移 |
 | `cloudflare_email_domains` | 旧单渠道 Cloudflare 邮箱域名列表，主要用于升级迁移 |
 | `cloudflare_admin_password` | 旧单渠道 Cloudflare 管理密码，主要用于升级迁移 |
@@ -2321,6 +2335,8 @@ POST /api/cloudflare/channels
 | --- | --- | --- |
 | `duckmail_base_url` | string | DuckMail API 地址 |
 | `duckmail_api_key` | string | DuckMail API Key |
+| `mailnest_base_url` | string | 迈巢 MailNest API 地址，默认 `https://mailnest.top` |
+| `mailnest_api_key` | string | 迈巢 MailNest API Key |
 | `cloudflare_worker_domain` | string | 旧单渠道 Cloudflare Worker 域名；新配置请使用 `/api/cloudflare/channels` |
 | `cloudflare_email_domains` | string | 旧单渠道 Cloudflare 邮箱域名；新配置请使用 `/api/cloudflare/channels` |
 | `cloudflare_admin_password` | string | 旧单渠道 Cloudflare 管理密码；新配置请使用 `/api/cloudflare/channels` |

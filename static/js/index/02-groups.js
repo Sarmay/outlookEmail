@@ -2268,6 +2268,8 @@
             const cloudflareChannelGroup = document.getElementById('importCloudflareChannelGroup');
             const cloudflareModeGroup = document.getElementById('importCloudflareModeGroup');
             const cloudflareModeSelect = document.getElementById('importCloudflareImportMode');
+            const mailnestModeGroup = document.getElementById('importMailnestModeGroup');
+            const mailnestModeSelect = document.getElementById('importMailnestImportMode');
             const providerGroup = document.getElementById('importProviderGroup');
             const providerSelect = document.getElementById('importProviderSelect');
             const exampleEl = document.getElementById('importFormatExample');
@@ -2284,6 +2286,7 @@
             if (!isTempGroup) {
                 if (cloudflareChannelGroup) cloudflareChannelGroup.style.display = 'none';
                 if (cloudflareModeGroup) cloudflareModeGroup.style.display = 'none';
+                if (mailnestModeGroup) mailnestModeGroup.style.display = 'none';
                 if (importSource) importSource.style.display = '';
             }
             accountDefaultFields.forEach(field => {
@@ -2295,10 +2298,17 @@
                 if (customImapSettings) customImapSettings.style.display = 'none';
                 const channel = channelSelect ? channelSelect.value : 'gptmail';
                 const isCloudflare = channel === 'cloudflare';
+                const isMailnest = channel === 'mailnest';
                 const cloudflareMode = cloudflareModeSelect ? cloudflareModeSelect.value : 'auto';
+                const mailnestMode = mailnestModeSelect ? mailnestModeSelect.value : 'auto';
                 if (cloudflareChannelGroup) cloudflareChannelGroup.style.display = isCloudflare ? '' : 'none';
                 if (cloudflareModeGroup) cloudflareModeGroup.style.display = isCloudflare ? '' : 'none';
-                if (importSource) importSource.style.display = isCloudflare && cloudflareMode === 'auto' ? 'none' : '';
+                if (mailnestModeGroup) mailnestModeGroup.style.display = isMailnest ? '' : 'none';
+                if (importSource) {
+                    importSource.style.display = (isCloudflare && cloudflareMode === 'auto') || (isMailnest && mailnestMode === 'auto')
+                        ? 'none'
+                        : '';
+                }
                 if (isCloudflare && typeof loadCloudflareChannelsForImport === 'function') {
                     loadCloudflareChannelsForImport();
                 }
@@ -2326,6 +2336,24 @@
                     if (exampleEl) {
                         exampleEl.style.display = '';
                         exampleEl.textContent = '示例：\nuser@example.com\nuser2@example.com';
+                    }
+                    return;
+                }
+                if (channel === 'mailnest') {
+                    if (mailnestMode === 'auto') {
+                        hintEl.textContent = '从迈巢账户同步已购买的临时邮箱和独占邮箱。需要先配置迈巢 API Key。';
+                        inputEl.placeholder = '';
+                        if (exampleEl) {
+                            exampleEl.style.display = 'none';
+                            exampleEl.textContent = '';
+                        }
+                        return;
+                    }
+                    hintEl.textContent = '格式：每行一个已购买的迈巢邮箱地址。';
+                    inputEl.placeholder = 'user@outlook.com';
+                    if (exampleEl) {
+                        exampleEl.style.display = '';
+                        exampleEl.textContent = '示例：\nuser@outlook.com\nuser2@hotmail.com';
                     }
                     return;
                 }
